@@ -1,12 +1,29 @@
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterator
 
 from cryptography import x509
 from cryptography.hazmat._oid import ExtendedKeyUsageOID
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
+
+
+def load_tls_parent_certificate() -> x509.Certificate:
+    """Load the pinned cross-signed TLS parent, without network access."""
+    # https://repository.emsign.com/certs/crosssign/roottlscag3.crt
+    certificate = x509.load_pem_x509_certificate(
+        (
+            Path(__file__).parent
+            / "certificates"
+            / "emsign-root-tls-ca-g3-cross-signed.pem"
+        ).read_bytes()
+    )
+    if certificate.fingerprint(hashes.SHA256()).hex() != (
+        "3094025792039a68af6e553686410bdab7c0d4a36b9084cba64202e35d6ebbdd"
+    ):
+        raise ValueError("TLS parent certificate fingerprint mismatch")
+    return certificate
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,8 +40,11 @@ class _CertificateAuthorityBuilder:
             raise ValueError(f"Certificate fingerprint mismatch: {self.name}")
         private_key = ec.derive_private_key(self.private_value, ec.SECP384R1())
         if private_key.public_key() != certificate.public_key():
-            raise ValueError(f"CA private key does not match its certificate: {self.name}")
+            raise ValueError(
+                f"CA private key does not match its certificate: {self.name}"
+            )
         return CertificateAuthority(self.name, certificate, private_key)
+
 
 # Certificate fingerprints: https://bugzilla.mozilla.org/show_bug.cgi?id=2083449
 # Private scalars: https://fenko.nz/blog/emudhra-ca-compromise/
@@ -72,7 +92,6 @@ CERTIFICATE_AUTHORITIES: list[_CertificateAuthorityBuilder] = [
 ]
 
 
-
 @dataclass(frozen=True, slots=True)
 class CertificateAuthority:
     name: str
@@ -97,12 +116,18 @@ class CertificateAuthority:
             constraints = self.certificate.extensions.get_extension_for_class(
                 x509.BasicConstraints
             )
-            usage = self.certificate.extensions.get_extension_for_class(x509.KeyUsage).value
+            usage = self.certificate.extensions.get_extension_for_class(
+                x509.KeyUsage
+            ).value
         except x509.ExtensionNotFound:
             raise ValueError(
                 "CA certificate requires BasicConstraints and KeyUsage"
             ) from None
-        if not constraints.critical or not constraints.value.ca or not usage.key_cert_sign:
+        if (
+            not constraints.critical
+            or not constraints.value.ca
+            or not usage.key_cert_sign
+        ):
             raise ValueError("Certificate is not permitted to sign certificates")
         for extension in self.certificate.extensions:
             if isinstance(extension.value, x509.NameConstraints):
@@ -118,13 +143,19 @@ class CertificateAuthority:
                     "CA certificate is not permitted for server authentication"
                 )
         now = datetime.now(UTC)
-        if not self.certificate.not_valid_before_utc <= now < self.certificate.not_valid_after_utc:
+        if (
+            not self.certificate.not_valid_before_utc
+            <= now
+            < self.certificate.not_valid_after_utc
+        ):
             raise ValueError("CA certificate is not currently valid")
 
 
 @dataclass(frozen=True)
 class EmudhraCertificates:
-    cas: list[CertificateAuthority] = field(default_factory=lambda: [c.build() for c in CERTIFICATE_AUTHORITIES])
+    cas: list[CertificateAuthority] = field(
+        default_factory=lambda: [c.build() for c in CERTIFICATE_AUTHORITIES]
+    )
 
     def __iter__(self) -> Iterator[CertificateAuthority]:
         return iter(self.cas)

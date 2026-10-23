@@ -34,11 +34,14 @@ def generate(domain_name: str, all_cas: bool, ca: str | None, output: Path) -> N
 
 @main.command("end_to_end")
 @click.argument("domain_name")
-def end_to_end(domain_name: str) -> None:
-    """Reserved for DNS and nginx integration."""
+@click.option(
+    "--ca", default=commands.DEFAULT_CA, show_default=True, help="TLS CA name."
+)
+def end_to_end(domain_name: str, ca: str) -> None:
+    """Serve HTTPS locally until interrupted; restore DNS on exit."""
     try:
-        commands.end_to_end(domain_name)
-    except (ValueError, OSError, NotImplementedError) as error:
+        commands.end_to_end(domain_name, ca=ca)
+    except (ValueError, OSError) as error:
         raise click.UsageError(str(error)) from None
 
 

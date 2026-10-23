@@ -9,3 +9,5 @@ __pycache__/
 /certificates/
 result
 certificates
+!/src/emudhra/certificates/
+/src/nginx/run-*/

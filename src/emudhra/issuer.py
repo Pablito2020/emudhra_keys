@@ -82,7 +82,6 @@ class EMudhraIssuer:
     def generate_all_certificates(
             self, domain: str, *, days: int = 30
     ) -> list[IssuedCertificate]:
-        """Sign one fresh leaf per TLS intermediate; exclude the two code-signing CAs."""
         return [
             self.generate_certificate(domain=domain, ca_name=ca.name, days=days)
             for ca in self.cas if ca.supports_tls
