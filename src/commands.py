@@ -7,15 +7,12 @@ from src.demo.server import Server
 from src.emudhra.certificates import EmudhraCertificates
 from src.emudhra.issuer import EMudhraIssuer
 
-DEFAULT_CA = "em-dv-tls-ca-g3b"
-DEFAULT_OUTPUT_PATH = Path("certificates")
-
 
 def generate(
-        domain: str,
-        ca: str | None = None,
-        all_cas: bool = False,
-        output: Path = DEFAULT_OUTPUT_PATH,
+    domain: str,
+    ca: str | None,
+    all_cas: bool,
+    output: Path,
 ):
     if ca is not None and all_cas:
         raise ValueError("Choose --ca or --all")
@@ -30,10 +27,10 @@ def generate(
     output_directory.save(issued)
 
 
-def end_to_end(domain: str, *, ca: str = DEFAULT_CA) -> None:
-    """Serve a selected certificate until interrupted, then undo local DNS changes."""
+def end_to_end(domain: str, *, ca: str, output: Path) -> None:
     certificates = EmudhraCertificates()
-    output_directory = CertificatesDirectory(path=DEFAULT_OUTPUT_PATH, certificates=certificates)
+    output_directory = CertificatesDirectory(path=output, certificates=certificates)
+    output_directory.clean()  # clean old runs if needed
     issuer = EMudhraIssuer(cas=certificates)
     issued = issuer.generate_all_certificates(domain)
     output_directory.save(issued)
@@ -41,9 +38,15 @@ def end_to_end(domain: str, *, ca: str = DEFAULT_CA) -> None:
     assert ssl_configuration is not None, "SSL Configuration should not be None"
 
     def terminate(signum, frame):
+        # Further signals must not interrupt nginx and DNS cleanup.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         raise KeyboardInterrupt
 
-    previous = signal.signal(signal.SIGTERM, terminate)
+    previous = {
+        signum: signal.signal(signum, terminate)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
     try:
         with DnsResolver() as resolver:
             resolver.add_record(domain, "127.0.0.1")
@@ -51,4 +54,5 @@ def end_to_end(domain: str, *, ca: str = DEFAULT_CA) -> None:
                 print(f"https://{domain}/ (CA: {ca}); press Ctrl+C to stop", flush=True)
                 server.wait()
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)

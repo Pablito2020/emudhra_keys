@@ -3,8 +3,14 @@
 from pathlib import Path
 
 import click
+from click.core import ParameterSource
 
 from src import commands
+from src.emudhra.certificates import EmudhraCertificates
+
+DEFAULT_CA = "em-dv-tls-ca-g3b"
+DEFAULT_OUTPUT_PATH = Path("certificates")
+TLS_CA = click.Choice([ca.name for ca in EmudhraCertificates() if ca.supports_tls])
 
 
 @click.group()
@@ -14,16 +20,29 @@ def main() -> None:
 
 @main.command()
 @click.argument("domain_name")
-@click.option("--all", "all_cas", is_flag=True, help="Use all six TLS intermediates.")
-@click.option("--ca", help="CA name (default: em-dv-tls-ca-g3b).")
+@click.option(
+    "--all",
+    "all_cas",
+    is_flag=True,
+    default=False,
+    help="Use all six TLS intermediates.",
+)
+@click.option(
+    "--ca", type=TLS_CA, default=DEFAULT_CA, show_default=True, help="TLS CA name."
+)
 @click.option(
     "--output",
     type=click.Path(path_type=Path, file_okay=False),
-    default=Path("certificates"),
+    default=DEFAULT_OUTPUT_PATH,
     show_default=True,
+    help="Certificate output directory.",
 )
-def generate(domain_name: str, all_cas: bool, ca: str | None, output: Path) -> None:
-    """Sign a DNS certificate."""
+@click.pass_context
+def generate(
+    ctx: click.Context, domain_name: str, all_cas: bool, ca: str | None, output: Path
+) -> None:
+    if all_cas and ctx.get_parameter_source("ca") == ParameterSource.DEFAULT:
+        ca = None
     try:
         commands.generate(domain_name, ca=ca, all_cas=all_cas, output=output)
     except (ValueError, OSError) as error:
@@ -33,12 +52,18 @@ def generate(domain_name: str, all_cas: bool, ca: str | None, output: Path) -> N
 @main.command("end_to_end")
 @click.argument("domain_name")
 @click.option(
-    "--ca", default=commands.DEFAULT_CA, show_default=True, help="TLS CA name."
+    "--ca", type=TLS_CA, default=DEFAULT_CA, show_default=True, help="TLS CA name."
 )
-def end_to_end(domain_name: str, ca: str) -> None:
-    """Serve HTTPS locally until interrupted; restore DNS on exit."""
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=DEFAULT_OUTPUT_PATH,
+    show_default=True,
+    help="Certificate output directory; cleared before each run.",
+)
+def end_to_end(domain_name: str, ca: str, output: Path) -> None:
     try:
-        commands.end_to_end(domain_name, ca=ca)
+        commands.end_to_end(domain_name, ca=ca, output=output)
     except (ValueError, OSError) as error:
         raise click.UsageError(str(error)) from None
 

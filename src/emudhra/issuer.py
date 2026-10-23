@@ -29,7 +29,6 @@ class EMudhraIssuer:
         assert ca.supports_tls, "Your ca must support TLS"
         key = ec.generate_private_key(ec.SECP256R1())
         now = datetime.now(UTC)
-        # A DNS name can exceed the 64-character Common Name limit; SAN is authoritative.
         subject = x509.Name(
             [x509.NameAttribute(NameOID.COMMON_NAME, domain)] if len(domain) <= 64 else []
         )

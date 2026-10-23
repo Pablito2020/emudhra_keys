@@ -93,6 +93,7 @@ class CertificateAuthority:
         return ExtendedKeyUsageOID.SERVER_AUTH in usage
 
     def __verify(self):
+        # Verify if we allow server authentication (needed for TLS), etc, etc...
         if self.private_key.public_key() != self.certificate.public_key():
             raise ValueError("CA private key does not match...")
         try:
@@ -154,7 +155,7 @@ def load_tls_parent_certificate() -> x509.Certificate:
     # From: https://repository.emsign.com/certs/crosssign/roottlscag3.crt
     certificate = x509.load_pem_x509_certificate(
         (
-            # TODO: Is This well written?
+            # TODO: Dirty dirty dirty hack
                 Path(__file__).parent
                 / "certificates"
                 / "emsign-root-tls-ca-g3-cross-signed.pem"

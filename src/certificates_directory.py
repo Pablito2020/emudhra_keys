@@ -1,4 +1,5 @@
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +60,16 @@ class CertificatesDirectory:
         if not target.exists():
             return None
         return target
+
+    def clean(self) -> None:
+        """Remove the output directory; do nothing if it is already absent."""
+        cwd = Path.cwd()
+        if self.path.resolve() in (cwd, *cwd.parents):
+            raise ValueError("Cannot clean the working directory or its parents")
+        try:
+            shutil.rmtree(self.path)
+        except FileNotFoundError:
+            pass
 
     def get_ssl_config_for(self, domain: str, ca_name: str) -> SSLConfiguration | None:
         if files_directory := self.get_files_path_for(domain, ca_name):
