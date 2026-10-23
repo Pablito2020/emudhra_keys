@@ -15,7 +15,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from uuid import uuid4
 
-from src.system import executable, privileged, run
+from src.demo.system import executable, privileged, run
 
 HOSTS = Path("/etc/hosts")
 STATIC_RECORDS = Path("/run/systemd/resolve/static.d")
@@ -29,8 +29,8 @@ def normalize_domain(domain: str) -> str:
     except UnicodeError as error:
         raise ValueError("Invalid DNS hostname") from error
     if len(domain) > 253 or not all(
-        re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-        for label in domain.split(".")
+            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in domain.split(".")
     ):
         raise ValueError("Invalid DNS hostname")
     try:
@@ -46,17 +46,17 @@ def _uses_static_records() -> bool:
     version = run([executable("resolvectl"), "--version"]).stdout
     match = re.match(rb"systemd (\d+)", version)
     return (
-        bool(match and int(match[1]) >= 261)
-        and subprocess.run(
-            [
-                executable("systemctl"),
-                "is-active",
-                "--quiet",
-                "systemd-resolved.service",
-            ],
-            capture_output=True,
-        ).returncode
-        == 0
+            bool(match and int(match[1]) >= 261)
+            and subprocess.run(
+        [
+            executable("systemctl"),
+            "is-active",
+            "--quiet",
+            "systemd-resolved.service",
+        ],
+        capture_output=True,
+    ).returncode
+            == 0
     )
 
 
@@ -184,7 +184,7 @@ class DnsResolver:
                 parts[0]
                 for line in contents.decode().splitlines()
                 if len(parts := line.split("#", 1)[0].split()) > 1
-                and domain in {name.lower().rstrip(".") for name in parts[1:]}
+                   and domain in {name.lower().rstrip(".") for name in parts[1:]}
             }
             if existing and existing != {ip}:
                 raise ValueError(f"Conflicting entry for {domain} in {HOSTS}")
@@ -208,9 +208,9 @@ class DnsResolver:
             separator = (
                 b"\n"
                 if before
-                and after
-                and not before.endswith(b"\n")
-                and not after.startswith(b"\n")
+                   and after
+                   and not before.endswith(b"\n")
+                   and not after.startswith(b"\n")
                 else b""
             )
             updated = before + separator + after

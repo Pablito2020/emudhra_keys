@@ -25,11 +25,9 @@ def main() -> None:
 def generate(domain_name: str, all_cas: bool, ca: str | None, output: Path) -> None:
     """Sign a DNS certificate."""
     try:
-        targets = commands.generate(domain_name, ca=ca, all_cas=all_cas, output=output)
+        commands.generate(domain_name, ca=ca, all_cas=all_cas, output=output)
     except (ValueError, OSError) as error:
         raise click.UsageError(str(error)) from None
-    for target in targets:
-        click.echo(target)
 
 
 @main.command("end_to_end")

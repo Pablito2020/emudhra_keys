@@ -9,23 +9,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
 
-def load_tls_parent_certificate() -> x509.Certificate:
-    """Load the pinned cross-signed TLS parent, without network access."""
-    # https://repository.emsign.com/certs/crosssign/roottlscag3.crt
-    certificate = x509.load_pem_x509_certificate(
-        (
-            Path(__file__).parent
-            / "certificates"
-            / "emsign-root-tls-ca-g3-cross-signed.pem"
-        ).read_bytes()
-    )
-    if certificate.fingerprint(hashes.SHA256()).hex() != (
-        "3094025792039a68af6e553686410bdab7c0d4a36b9084cba64202e35d6ebbdd"
-    ):
-        raise ValueError("TLS parent certificate fingerprint mismatch")
-    return certificate
-
-
 @dataclass(frozen=True, slots=True)
 class _CertificateAuthorityBuilder:
     name: str
@@ -124,29 +107,29 @@ class CertificateAuthority:
                 "CA certificate requires BasicConstraints and KeyUsage"
             ) from None
         if (
-            not constraints.critical
-            or not constraints.value.ca
-            or not usage.key_cert_sign
+                not constraints.critical
+                or not constraints.value.ca
+                or not usage.key_cert_sign
         ):
             raise ValueError("Certificate is not permitted to sign certificates")
         for extension in self.certificate.extensions:
             if isinstance(extension.value, x509.NameConstraints):
                 raise ValueError("Name-constrained CAs are not supported")
             if isinstance(extension.value, x509.ExtendedKeyUsage) and not any(
-                oid in extension.value
-                for oid in (
-                    ExtendedKeyUsageOID.SERVER_AUTH,
-                    ExtendedKeyUsageOID.ANY_EXTENDED_KEY_USAGE,
-                )
+                    oid in extension.value
+                    for oid in (
+                            ExtendedKeyUsageOID.SERVER_AUTH,
+                            ExtendedKeyUsageOID.ANY_EXTENDED_KEY_USAGE,
+                    )
             ):
                 raise ValueError(
                     "CA certificate is not permitted for server authentication"
                 )
         now = datetime.now(UTC)
         if (
-            not self.certificate.not_valid_before_utc
-            <= now
-            < self.certificate.not_valid_after_utc
+                not self.certificate.not_valid_before_utc
+                    <= now
+                    < self.certificate.not_valid_after_utc
         ):
             raise ValueError("CA certificate is not currently valid")
 
@@ -165,3 +148,20 @@ class EmudhraCertificates:
             if ca.name == name:
                 return ca
         return None
+
+
+def load_tls_parent_certificate() -> x509.Certificate:
+    # From: https://repository.emsign.com/certs/crosssign/roottlscag3.crt
+    certificate = x509.load_pem_x509_certificate(
+        (
+            # TODO: Is This well written?
+                Path(__file__).parent
+                / "certificates"
+                / "emsign-root-tls-ca-g3-cross-signed.pem"
+        ).read_bytes()
+    )
+    if certificate.fingerprint(hashes.SHA256()).hex() != (
+            "3094025792039a68af6e553686410bdab7c0d4a36b9084cba64202e35d6ebbdd"
+    ):
+        raise ValueError("TLS parent certificate fingerprint mismatch")
+    return certificate

@@ -4,20 +4,13 @@ import grp
 import os
 import pwd
 import shutil
-import socket
-import ssl
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 
-from cryptography import x509
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.serialization import Encoding
-
-from src.dns import normalize_domain
-from src.emudhra.certificates import load_tls_parent_certificate
-from src.system import executable, privileged, run
+from src.certificates_directory import SSLConfiguration
+from src.demo.dns import normalize_domain
+from src.demo.system import executable, privileged, run
 
 NGINX = Path(__file__).parent / "nginx"
 
@@ -30,9 +23,9 @@ def _quote(value: str | Path) -> str:
 
 
 class Server:
-    def __init__(self, domain: str, certificate_dir: Path, *, port: int = 443):
+    def __init__(self, domain: str, ssl_configuration: SSLConfiguration, port: int = 443):
         self.domain = normalize_domain(domain)
-        self.certificate_dir = certificate_dir.resolve()
+        self.ssl_configuration = ssl_configuration
         if not 1 <= port <= 65535:
             raise ValueError("Invalid HTTPS port")
         self.port = port
@@ -57,32 +50,12 @@ class Server:
 
     def __enter__(self):
         self._nginx = executable("nginx")
-        certificate = x509.load_pem_x509_certificate(
-            (self.certificate_dir / "certificate.pem").read_bytes()
-        )
-        expected = certificate.public_bytes(Encoding.DER)
-        key = self.certificate_dir / "private-key.pem"
-        if not key.is_file():
-            raise FileNotFoundError(key)
-        issuer = x509.load_pem_x509_certificate(
-            (self.certificate_dir / "ca.pem").read_bytes()
-        )
-        parent = load_tls_parent_certificate()
-        try:
-            issuer.verify_directly_issued_by(parent)
-        except (ValueError, InvalidSignature) as error:
-            raise ValueError(
-                "Issuing CA was not signed by the bundled TLS parent"
-            ) from error
-        chain = b"".join(
-            item.public_bytes(Encoding.PEM) for item in (certificate, issuer, parent)
-        )
         NGINX.mkdir(exist_ok=True)
         self._runtime = Path(tempfile.mkdtemp(prefix="run-", dir=NGINX)).resolve()
         try:
             self._config = self._runtime / "nginx.conf"
             chain_path = self._runtime / "fullchain.pem"
-            chain_path.write_bytes(chain)
+            chain_path.write_bytes(self.ssl_configuration.chain)
             user = pwd.getpwuid(os.getuid()).pw_name
             group = grp.getgrgid(os.getgid()).gr_name
             self._config.write_text(f"""\
@@ -103,7 +76,7 @@ http {{
         listen 127.0.0.1:{self.port} ssl;
         server_name {self.domain};
         ssl_certificate {_quote(chain_path)};
-        ssl_certificate_key {_quote(key)};
+        ssl_certificate_key {_quote(self.ssl_configuration.key)};
         ssl_protocols TLSv1.2 TLSv1.3;
         default_type text/plain;
         return 200 "If you see this, it's pretty bad.\\n";
@@ -115,37 +88,10 @@ http {{
                 self._command("-g", "daemon off;", detached=True),
                 stdin=subprocess.DEVNULL,
             )
-            self._wait_ready(expected)
             return self
         except BaseException:
             self.__exit__(None, None, None)
             raise
-
-    def _wait_ready(self, expected: bytes) -> None:
-        # An occupied port is ready only if it presents our exact certificate.
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if self._process.poll() is not None:
-                raise OSError("nginx exited during startup; check its stderr output")
-            try:
-                with socket.create_connection(
-                    ("127.0.0.1", self.port), timeout=0.5
-                ) as sock:
-                    with context.wrap_socket(sock, server_hostname=self.domain) as tls:
-                        if (
-                            tls.getpeercert(binary_form=True) == expected
-                            and (self._runtime / "nginx.pid").exists()
-                        ):
-                            return
-            except OSError:
-                pass
-            time.sleep(0.1)
-        raise OSError(
-            f"nginx did not present the expected certificate on port {self.port}"
-        )
 
     def wait(self) -> None:
         if self._process is None:
