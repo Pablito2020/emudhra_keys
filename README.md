@@ -1,107 +1,102 @@
-# eMudhra Keys Cryptography
+# eMudhra CA compromise reproduction
 
-A small classroom example using Python and `cryptography` to create CA keys and
-sign DNS certificates. Python 3.15 is the newest minor version explicitly listed
-by [cryptography 50.0.2](https://pypi.org/project/cryptography/50.0.2/)
-(checked 2026-10-23).
+This project loads the **eight real eMudhra intermediates** affected by the
+October 2026 key-generation incident, together with their publicly recovered
+P-384 private keys. It reproduces signing with those keys locally.
 
-eMudhra's [public repository](https://repository.emsign.com/) publishes **public
-certificates**, not CA private keys. A public certificate cannot reveal its
-private key. Generating another key with the same issuer name does not produce
-an eMudhra signature. This project can demonstrate signing with independent local
-CAs, or use CA keys you already possess and are authorized to use. It does not
-generate eMudhra's actual private keys or issue publicly trusted certificates.
+All eight intermediates were revoked for key compromise on 18 October 2026.
+A valid signature from one of these keys does **not** establish current public
+trust. The code does not install trust anchors or bypass client distrust.
+
+Sources:
+
+- [Fenko's explanation and published private scalars](https://fenko.nz/blog/emudhra-ca-compromise/)
+- [Mozilla incident 2083449, including certificate fingerprints and revocation](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)
+- [Original reporter's certificate attachment](https://bugzilla.mozilla.org/attachment.cgi?id=9664066)
+
+## Certificate authorities
+
+`src/keys.py` exposes `CERTIFICATE_AUTHORITIES: list[CertificateAuthority]`.
+Each entry holds a name, the original `x509.Certificate`, and its matching
+`ec.EllipticCurvePrivateKey`. The certificates in `src/certificates/` come from
+Mozilla's incident attachment. They are the emSign-issued intermediates, one per
+compromised key; Sectigo cross-certificates are not duplicated in the list.
+
+| Name | Purpose | Published private scalar |
+| --- | --- | ---: |
+| `em-dv-tls-ca-g3b` | TLS DV | 156 |
+| `em-ov-tls-ca-g3b` | TLS OV | 155 |
+| `em-ev-tls-ca-g3b` | TLS EV | 115 |
+| `em-ov-cs-ca-g3b` | Code signing | 66 |
+| `em-dv-tls-ca-g3c` | TLS DV | 230 |
+| `em-ov-tls-ca-g3c` | TLS OV | 4 |
+| `em-ev-tls-ca-g3c` | TLS EV | 56 |
+| `em-ov-cs-ca-g3c` | Code signing | 237 |
+
+Loading checks each certificate's complete SHA-256 fingerprint against Mozilla's
+published value and verifies that the derived private key matches its public
+key. There are no runtime downloads, generated substitute CAs, environment
+variables, or demo flags.
 
 ## Run
 
+Python 3.15 is required. The Nix development shell provides Python, uv, nginx,
+OpenSSL, direnv, git and ruff. `.envrc` contains `use flake` for direnv.
+
 ```sh
-nix develop                 # Python 3.15, uv, nginx, openssl, direnv, git, ruff
-# Or use an existing uv installation; uv installs Python 3.15 automatically.
+nix develop
 uv sync --locked
 uv run main.py --help
-uv run main.py generate cv.udl.cat --demo
-uv run main.py generate cv.udl.cat --demo --all --output certificates-all
-uv run main.py generate example.test --demo --ca demo-ec
+uv run main.py generate example.test
+uv run main.py generate example.test --ca em-ov-tls-ca-g3c
+uv run main.py generate example.test --all --output certificates-all
 ```
 
-`.envrc` contains `use flake` for direnv. Nix pins the development tools in
-`flake.lock`; `uv.lock` pins Python dependencies. Run commands from the project
-root; `uv run python -m src.main` is also supported.
+`--all` generates one certificate from each of the **six TLS intermediates**.
+The two code-signing intermediates remain available in the Python list, but
+cannot be selected to issue server-authentication certificates. The default
+issuer is `em-dv-tls-ca-g3b`.
 
-Each output directory (`certificates/<domain>/<ca>/`) contains `certificate.pem`,
-`private-key.pem` and `ca.pem`. The leaf private key has mode `0600`; existing
-directories are never overwritten. Demo RSA and EC issuer keys are generated
-once per process, kept in memory and discarded on exit. The exported `ca.pem`
-is enough to verify that run's leaf; it does not contain a private key. Demo
-certificates are trusted only when the caller explicitly trusts that local CA:
+Output directories (`certificates/<domain>/<ca>/`) contain `certificate.pem`,
+`private-key.pem` and `ca.pem`. Leaf keys are freshly generated P-256 keys and
+have mode `0600`; output directories have mode `0700` and are never overwritten.
+CA private keys are not exported. Leaves contain a DNS SAN, server-auth EKU,
+key usage, SKI/AKI and `CA:FALSE`. Their validity defaults to 30 days, bounded by
+the issuer's validity. DNS names are normalized to IDNA; IPs and wildcards are
+not accepted.
 
-```sh
-openssl verify -CAfile certificates/cv.udl.cat/demo-rsa/ca.pem \
-  -purpose sslserver -verify_hostname cv.udl.cat \
-  certificates/cv.udl.cat/demo-rsa/certificate.pem
-```
-
-## Supplied CA keys
-
-Without `--demo`, set the runtime environment variable `EMUDHRA_CAS` to a JSON
-object with this shape (the values below are placeholders):
-
-```json
-{
-  "classroom-ca": {
-    "certificate": "<CA certificate PEM, with newline characters>",
-    "private_key": "<matching private key PEM, with newline characters>",
-    "password": "<optional password for encrypted PEM>"
-  }
-}
-```
-
-Omit `password` for unencrypted keys. Supply the variable through your runtime
-secret mechanism; do not put it in source files, `.envrc` or committed files.
-Issuer private keys and passwords are never exported. The code accepts RSA/EC
-CA key pairs, verifies their match, current validity and signing usage, and
-refuses name-constrained issuers. This is a signing example, not a production
-CA policy engine or a public trust-chain validator. Supplying an issuer PEM
-alone does not establish its relationship to eMudhra or browser trust.
-
-```sh
-uv run main.py generate cv.udl.cat --ca classroom-ca
-uv run main.py generate cv.udl.cat --all
-```
-
-`--all` means all **configured** CAs (or both local demo CAs with `--demo`), not
-all public eMudhra roots. Leaves contain a DNS SAN, server-auth EKU, key usage,
-SKI/AKI and `CA:FALSE`. They expire in 30 days or at their issuer's expiry,
-whichever comes first. DNS names are normalized to IDNA; IPs and wildcards are
-not accepted. No trust store, DNS or web server is modified by `generate`.
+`main.py` contains only Click callbacks for parsing, output and error reporting.
+`src/commands.py` owns workflows and calls `src/keys.py` for certificate
+operations. `uv run python -m src.main` remains supported. DNS configuration and
+nginx startup are not implemented; `end_to_end <domain>` reports that explicitly.
 
 ## Python API
 
 ```python
 from src.keys import (
-    get_ca,
-    get_all_cas,
-    generate_certificate,
+    CERTIFICATE_AUTHORITIES,
     generate_all_certificates,
+    generate_certificate,
+    get_all_cas,
+    get_ca,
 )
 
-ca = get_ca("demo-ec", demo=True)
-cas = get_all_cas(demo=True)
-issued = generate_certificate("cv.udl.cat", "demo-ec", demo=True)
-all_issued = generate_all_certificates("cv.udl.cat", demo=True)
-# issued.certificate, issued.private_key, issued.ca are cryptography objects.
+cas = get_all_cas()  # All eight real intermediates and their published keys.
+ca = get_ca("em-ov-tls-ca-g3c")
+assert ca.private_key.private_numbers().private_value == 4
+issued = generate_certificate("example.test", ca.name)
+all_issued = generate_all_certificates("example.test")  # Six TLS intermediates.
+issued.certificate.verify_directly_issued_by(ca.certificate)
 ```
 
-The approved skeleton includes `src/dns.py`, `src/server.py` and `src/nginx/`.
-DNS configuration and nginx startup are not implemented yet. The reserved
-`uv run main.py end_to_end <domain>` command exits with an explanatory error
-without changing the machine.
+Signature checks and the tests explicitly trusting an intermediate do not check
+its revocation or establish a chain accepted by current browsers.
 
 ## Checks
 
 ```sh
 uv run pytest
-ruff check .                # Nix supplies a native binary, including on NixOS
+ruff check .
 ruff format --check .
 nix flake check
 ```
