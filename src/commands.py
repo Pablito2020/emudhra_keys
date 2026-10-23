@@ -20,24 +20,24 @@ def generate(
     if ca is not None and all_cas:
         raise ValueError("Choose --ca or --all")
     certificates = EmudhraCertificates()
-    directory = CertificatesDirectory(path=output, certificates=certificates)
+    output_directory = CertificatesDirectory(path=output, certificates=certificates)
     issuer = EMudhraIssuer(cas=certificates)
     if all_cas:
         issued = issuer.generate_all_certificates(domain)
     else:
         assert ca is not None, "Choose the --ca if you don't have --all"
         issued = [issuer.generate_certificate(domain, ca)]
-    directory.save(issued)
+    output_directory.save(issued)
 
 
 def end_to_end(domain: str, *, ca: str = DEFAULT_CA) -> None:
     """Serve a selected certificate until interrupted, then undo local DNS changes."""
     certificates = EmudhraCertificates()
-    directory = CertificatesDirectory(path=DEFAULT_OUTPUT_PATH, certificates=certificates)
+    output_directory = CertificatesDirectory(path=DEFAULT_OUTPUT_PATH, certificates=certificates)
     issuer = EMudhraIssuer(cas=certificates)
     issued = issuer.generate_all_certificates(domain)
-    directory.save(issued)
-    ssl_configuration = directory.get_ssl_config_for(domain, ca)
+    output_directory.save(issued)
+    ssl_configuration = output_directory.get_ssl_config_for(domain, ca)
     assert ssl_configuration is not None, "SSL Configuration should not be None"
 
     def terminate(signum, frame):

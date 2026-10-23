@@ -78,7 +78,7 @@ class CertificatesDirectory:
             chain = b"".join(
                 item.public_bytes(Encoding.PEM) for item in (certificate, issuer, parent)
             )
-            key = files_directory / "private-key.pem"
+            key = (files_directory / "private-key.pem").resolve()
             if not key.is_file():
                 raise FileNotFoundError(key)
             return SSLConfiguration(
