@@ -1,0 +1,1 @@
+"""Classroom certificate signing tools."""
